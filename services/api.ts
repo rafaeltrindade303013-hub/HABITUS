@@ -1,6 +1,5 @@
 import { User, Challenge, Transaction, UserPlan, KycStatus, ChallengeType, ModerationItem } from '../types';
-
-const XANO_API_URL = import.meta.env.VITE_XANO_API_URL;
+import { supabase } from './supabase';
 
 // --- MOCK DATA ---
 const MOCK_USER: User = {
@@ -89,46 +88,177 @@ const xanoFetch = async (endpoint: string, options: RequestInit = {}) => {
 
 export const api = {
   login: async (email: string, pass: string): Promise<User> => {
-    await delay(500);
-    if (email && pass) {
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password: pass,
+    });
+
+    if (authError || !authData.user) {
+      throw new Error("Credenciais inválidas");
+    }
+
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', authData.user.id)
+      .maybeSingle();
+
+    if (userError || !userData) {
+      await delay(500);
       return MOCK_USER;
     }
-    throw new Error("Credenciais inválidas");
+
+    return {
+      id: userData.id,
+      name: userData.name,
+      email: userData.email,
+      cpf_hash: userData.cpf_hash,
+      state: userData.state,
+      city: userData.city,
+      phone: userData.phone,
+      nickname: userData.nickname,
+      avatarUrl: userData.avatar_url,
+      birthDate: userData.birth_date,
+      plan: userData.plan as UserPlan,
+      xp: userData.xp,
+      saldo: userData.saldo,
+      device_id: userData.device_id,
+      kyc_status: userData.kyc_status as KycStatus,
+      createdAt: new Date(userData.created_at),
+    };
   },
 
   loginWithGoogle: async (credential: string): Promise<User> => {
-    await delay(500);
-    return MOCK_USER;
+    const { data: authData, error: authError } = await supabase.auth.signInWithIdToken({
+      provider: 'google',
+      token: credential,
+    });
+
+    if (authError || !authData.user) {
+      throw new Error("Falha na autenticação com Google");
+    }
+
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', authData.user.id)
+      .maybeSingle();
+
+    if (userError || !userData) {
+      await delay(500);
+      return MOCK_USER;
+    }
+
+    return {
+      id: userData.id,
+      name: userData.name,
+      email: userData.email,
+      cpf_hash: userData.cpf_hash,
+      state: userData.state,
+      city: userData.city,
+      phone: userData.phone,
+      nickname: userData.nickname,
+      avatarUrl: userData.avatar_url,
+      birthDate: userData.birth_date,
+      plan: userData.plan as UserPlan,
+      xp: userData.xp,
+      saldo: userData.saldo,
+      device_id: userData.device_id,
+      kyc_status: userData.kyc_status as KycStatus,
+      createdAt: new Date(userData.created_at),
+    };
   },
 
   checkSession: async (): Promise<User> => {
-    try {
-      const data = await xanoFetch('/auth/me');
-      return data;
-    } catch (error) {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
       await delay(200);
       return MOCK_USER;
     }
+
+    const { data: userData, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', session.user.id)
+      .maybeSingle();
+
+    if (error || !userData) {
+      await delay(200);
+      return MOCK_USER;
+    }
+
+    return {
+      id: userData.id,
+      name: userData.name,
+      email: userData.email,
+      cpf_hash: userData.cpf_hash,
+      state: userData.state,
+      city: userData.city,
+      phone: userData.phone,
+      nickname: userData.nickname,
+      avatarUrl: userData.avatar_url,
+      birthDate: userData.birth_date,
+      plan: userData.plan as UserPlan,
+      xp: userData.xp,
+      saldo: userData.saldo,
+      device_id: userData.device_id,
+      kyc_status: userData.kyc_status as KycStatus,
+      createdAt: new Date(userData.created_at),
+    };
   },
 
   getChallenges: async (): Promise<Challenge[]> => {
-    try {
-      const data = await xanoFetch('/challenges');
-      return data;
-    } catch (error) {
+    const { data, error } = await supabase
+      .from('challenges')
+      .select('*')
+      .order('start_date', { ascending: true });
+
+    if (error || !data || data.length === 0) {
       await delay(500);
       return MOCK_CHALLENGES;
     }
+
+    return data.map(challenge => ({
+      id: challenge.id,
+      title: challenge.title,
+      type: challenge.type as ChallengeType,
+      description: challenge.description,
+      rules: challenge.rules,
+      entryValue: challenge.entry_value,
+      vacancies: challenge.vacancies,
+      participantsCount: challenge.participants_count,
+      startDate: new Date(challenge.start_date),
+      endDate: new Date(challenge.end_date),
+      registrationEnd: new Date(challenge.registration_end),
+    }));
   },
 
   getChallengeById: async (id: string): Promise<Challenge | undefined> => {
-    try {
-      const data = await xanoFetch(`/challenges/${id}`);
-      return data;
-    } catch (error) {
+    const { data, error } = await supabase
+      .from('challenges')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error || !data) {
       await delay(300);
       return MOCK_CHALLENGES.find(c => c.id === id);
     }
+
+    return {
+      id: data.id,
+      title: data.title,
+      type: data.type as ChallengeType,
+      description: data.description,
+      rules: data.rules,
+      entryValue: data.entry_value,
+      vacancies: data.vacancies,
+      participantsCount: data.participants_count,
+      startDate: new Date(data.start_date),
+      endDate: new Date(data.end_date),
+      registrationEnd: new Date(data.registration_end),
+    };
   },
 
   getChallengeRoomData: async (id: string): Promise<{ challenge: Challenge, participants: typeof MOCK_PARTICIPANTS } | null> => {
@@ -147,21 +277,80 @@ export const api = {
   },
 
   updateUser: async (updates: Partial<User>): Promise<User> => {
-    try {
-      const data = await xanoFetch('/auth/me', {
-        method: 'PATCH',
-        body: JSON.stringify(updates),
-      });
-      return data;
-    } catch (error) {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
       await delay(300);
       return { ...MOCK_USER, ...updates };
     }
+
+    const dbUpdates: any = {};
+    if (updates.name) dbUpdates.name = updates.name;
+    if (updates.phone) dbUpdates.phone = updates.phone;
+    if (updates.city) dbUpdates.city = updates.city;
+    if (updates.nickname) dbUpdates.nickname = updates.nickname;
+    if (updates.avatarUrl) dbUpdates.avatar_url = updates.avatarUrl;
+    if (updates.birthDate) dbUpdates.birth_date = updates.birthDate;
+
+    const { data, error } = await supabase
+      .from('users')
+      .update(dbUpdates)
+      .eq('id', session.user.id)
+      .select()
+      .single();
+
+    if (error || !data) {
+      await delay(300);
+      return { ...MOCK_USER, ...updates };
+    }
+
+    return {
+      id: data.id,
+      name: data.name,
+      email: data.email,
+      cpf_hash: data.cpf_hash,
+      state: data.state,
+      city: data.city,
+      phone: data.phone,
+      nickname: data.nickname,
+      avatarUrl: data.avatar_url,
+      birthDate: data.birth_date,
+      plan: data.plan as UserPlan,
+      xp: data.xp,
+      saldo: data.saldo,
+      device_id: data.device_id,
+      kyc_status: data.kyc_status as KycStatus,
+      createdAt: new Date(data.created_at),
+    };
   },
   
   getWalletTransactions: async (): Promise<Transaction[]> => {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
       await delay(600);
       return MOCK_TRANSACTIONS;
+    }
+
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false });
+
+    if (error || !data || data.length === 0) {
+      await delay(600);
+      return MOCK_TRANSACTIONS;
+    }
+
+    return data.map(t => ({
+      id: t.id,
+      type: t.type as 'deposito' | 'saque' | 'entrada_desafio',
+      amount: t.amount,
+      fee: t.fee,
+      status: t.status as 'pendente' | 'concluido' | 'falhou',
+      createdAt: new Date(t.created_at),
+    }));
   },
   
   generateKeyword: async (participationId: string, checkType: 'checkin' | 'checkout'): Promise<string> => {
@@ -204,15 +393,46 @@ export const api = {
   },
 
   getModerationQueue: async (): Promise<ModerationItem[]> => {
+    const { data, error } = await supabase
+      .from('moderation_items')
+      .select('*')
+      .order('liveness_score', { ascending: true });
+
+    if (error || !data || data.length === 0) {
       await delay(800);
       return MOCK_MODERATION_ITEMS.sort((a,b) => a.livenessScore - b.livenessScore);
+    }
+
+    return data.map(item => ({
+      id: item.id,
+      videoId: item.video_id,
+      participationId: item.participation_id,
+      challengeId: item.challenge_id,
+      userId: item.user_id,
+      userName: item.user_name,
+      videoUrl: item.video_url,
+      challengeTitle: item.challenge_title,
+      checkType: item.check_type as 'checkin' | 'checkout',
+      livenessScore: parseFloat(item.liveness_score),
+      gpsTraces: item.gps_traces || [],
+      metricsSummary: item.metrics_summary,
+      timestamp: new Date(item.timestamp),
+    }));
   },
 
   moderateVideo: async (moderationId: string, decision: 'aprovar' | 'reprovar'): Promise<boolean> => {
+    const { error } = await supabase
+      .from('moderation_items')
+      .delete()
+      .eq('id', moderationId);
+
+    if (error) {
       await delay(500);
       console.log(`Moderating item ${moderationId} with decision: ${decision}`);
-      // In a real app, this would update the item's status in Firestore.
       MOCK_MODERATION_ITEMS.splice(MOCK_MODERATION_ITEMS.findIndex(item => item.id === moderationId), 1);
       return true;
+    }
+
+    return true;
   }
 };
